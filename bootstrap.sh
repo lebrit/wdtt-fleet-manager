@@ -148,11 +148,14 @@ fi
 [ "${ACTION:-}" != "exit" ] || exit 0
 
 TEMP_SCRIPT="$(mktemp)"
+printf '[wdtt-fleet] Загрузка установщика из GitHub…\n'
 curl -fsSL --retry 3 "$SCRIPT_URL" -o "$TEMP_SCRIPT"
 
 if [ "$INTERACTIVE" = "1" ]; then
   export PANEL_HOST PANEL_USER PANEL_PASSWORD PANEL_EMAIL PANEL_HTTPS_PORT PANEL_PATH
+  printf '[wdtt-fleet] Выполняется: %s\n' "$ACTION"
   bash "$TEMP_SCRIPT" "$ACTION" </dev/tty
 else
+  printf '[wdtt-fleet] Выполняется: %s\n' "$1"
   bash "$TEMP_SCRIPT" "$@"
 fi

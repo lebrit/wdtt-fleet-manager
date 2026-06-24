@@ -120,6 +120,7 @@ validate_configuration() {
 
 install_files() {
   local ref="${1:-$FLEET_BRANCH}"
+  log "Получение файлов $FLEET_REPOSITORY@$ref"
   if [ -d "$INSTALL_DIR/.git" ]; then
     git -C "$INSTALL_DIR" fetch --depth=1 --tags origin "$ref" >>"$LOG_FILE" 2>&1
     git -C "$INSTALL_DIR" reset --hard FETCH_HEAD >>"$LOG_FILE" 2>&1
@@ -387,7 +388,7 @@ install_panel() {
 }
 
 update_panel() {
-  require_root; load_config; detect_os; install_node; install_files "$FLEET_BRANCH"; ensure_service_user; migrate_auth_file; write_service; write_nginx; systemctl restart "$SERVICE_NAME"; log "Панель обновлена"
+  require_root; load_config; log "Начато обновление панели"; detect_os; install_node; install_files "$FLEET_BRANCH"; ensure_service_user; migrate_auth_file; write_service; write_nginx; systemctl restart "$SERVICE_NAME"; log "Панель обновлена"
 }
 
 renew_certificates() {
