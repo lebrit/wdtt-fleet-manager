@@ -94,7 +94,8 @@ suggest_host() {
 read_or_default() {
   local prompt="$1" default="$2" answer
   if [ "$NON_INTERACTIVE" = "1" ]; then printf '%s' "$default"; return; fi
-  read -r -p "$prompt [$default]: " answer
+  [ -r /dev/tty ] && [ -w /dev/tty ] || die "Для интерактивной установки нужен терминал; используйте --non-interactive"
+  read -r -p "$prompt [$default]: " answer </dev/tty
   printf '%s' "${answer:-$default}"
 }
 
@@ -102,7 +103,11 @@ validate_configuration() {
   if [ -z "$PANEL_HOST" ]; then PANEL_HOST="$(read_or_default 'Домен или публичный IPv4' "$(suggest_host)")"; fi
   [ -n "$PANEL_HOST" ] || die "Укажите домен или публичный IPv4 через --domain или --ip"
   [[ "$PANEL_HOST" =~ ^[A-Za-z0-9.-]{1,253}$ ]] || die "Недопустимый домен или IP"
-  if [ -z "$PANEL_PASSWORD" ] && [ "$NON_INTERACTIVE" != "1" ]; then read -r -s -p "Пароль веб-панели (от 12 символов): " PANEL_PASSWORD; printf '\n'; fi
+  if [ -z "$PANEL_PASSWORD" ] && [ "$NON_INTERACTIVE" != "1" ]; then
+    [ -r /dev/tty ] && [ -w /dev/tty ] || die "Для ввода пароля нужен терминал; используйте --password"
+    read -r -s -p "Пароль веб-панели (от 12 символов): " PANEL_PASSWORD </dev/tty
+    printf '\n'
+  fi
   [ "${#PANEL_PASSWORD}" -ge 12 ] || die "Укажите пароль длиной не менее 12 символов через --password"
   [[ "$PANEL_USER" =~ ^[A-Za-z0-9_.@-]{1,64}$ ]] || die "Недопустимый логин"
   [[ "$PANEL_HTTPS_PORT" =~ ^[0-9]{2,5}$ ]] && [ "$PANEL_HTTPS_PORT" -le 65535 ] || die "Недопустимый HTTPS-порт"
@@ -393,7 +398,11 @@ renew_certificates() {
 
 change_password() {
   require_root; load_config
-  if [ -z "$PANEL_PASSWORD" ]; then read -r -s -p "Новый пароль веб-панели: " PANEL_PASSWORD; printf '\n'; fi
+  if [ -z "$PANEL_PASSWORD" ]; then
+    [ -r /dev/tty ] && [ -w /dev/tty ] || die "Для ввода пароля нужен терминал; используйте --password"
+    read -r -s -p "Новый пароль веб-панели: " PANEL_PASSWORD </dev/tty
+    printf '\n'
+  fi
   [ "${#PANEL_PASSWORD}" -ge 12 ] || die "Пароль должен содержать не менее 12 символов"
   htpasswd -bcB "$CONFIG_DIR/htpasswd" "$PANEL_USER" "$PANEL_PASSWORD" >>"$LOG_FILE" 2>&1
   chown root:wdtt-fleet "$CONFIG_DIR/htpasswd"; chmod 0640 "$CONFIG_DIR/htpasswd"
@@ -420,7 +429,8 @@ show_certificate_status() {
 change_path() {
   require_root; load_config
   local requested=""
-  read -r -p "Новый секретный путь (Enter — сгенерировать): " requested
+  [ -r /dev/tty ] && [ -w /dev/tty ] || die "Для изменения URL нужен терминал"
+  read -r -p "Новый секретный путь (Enter — сгенерировать): " requested </dev/tty
   PANEL_PATH="${requested:-/fleet-$(random_token 12)/}"
   [[ "$PANEL_PATH" =~ ^/[A-Za-z0-9_-]{8,64}/$ ]] || die "Путь должен выглядеть как /secret-path/"
   save_panel_config; write_nginx
@@ -433,7 +443,8 @@ rollback_panel() {
   if [ -z "$version" ]; then
     printf 'Доступные теги:\n'
     git ls-remote --tags --refs "https://github.com/$FLEET_REPOSITORY.git" | sed 's#.*refs/tags/##' | tail -n 20
-    read -r -p 'Введите тег для отката: ' version
+    [ -r /dev/tty ] && [ -w /dev/tty ] || die "Для выбора версии нужен терминал"
+    read -r -p 'Введите тег для отката: ' version </dev/tty
   fi
   [[ "$version" =~ ^[A-Za-z0-9._-]{1,80}$ ]] || die "Недопустимый тег"
   install_files "$version"; ensure_service_user; write_service; write_nginx; systemctl restart "$SERVICE_NAME"
@@ -453,10 +464,11 @@ uninstall_panel() {
 
 menu() {
   require_root
+  [ -r /dev/tty ] && [ -w /dev/tty ] || die "Интерактивное меню требует терминал"
   while true; do
     if [ ! -r "$CONFIG_DIR/panel.conf" ]; then
       printf '\nWDTT Fleet Manager\n1) Установить  0) Выход\n'
-      read -r -p 'Выберите действие [0-1]: ' answer
+      read -r -p 'Выберите действие [0-1]: ' answer </dev/tty
       case "$answer" in 1) install_panel ;; 0) return ;; *) log "Неверный выбор" ;; esac
       continue
     fi
@@ -464,7 +476,7 @@ menu() {
     printf '1) Обновить из GitHub   2) Откатить к тегу   3) Статус   4) Перезапустить\n'
     printf '5) Журнал сервиса        6) Сертификат        7) Обновить сертификат\n'
     printf '8) Сменить пароль        9) Изменить URL      10) Удалить панель  0) Выход\n'
-    read -r -p 'Выберите действие [0-10]: ' answer
+    read -r -p 'Выберите действие [0-10]: ' answer </dev/tty
     case "$answer" in
       1) update_panel ;;
       2) rollback_panel ;;
@@ -475,7 +487,7 @@ menu() {
       7) renew_certificates || true ;;
       8) change_password ;;
       9) change_path ;;
-      10) read -r -p 'Удалить только Fleet Manager? [y/N]: ' confirm; [[ "$confirm" =~ ^[Yy]$ ]] && uninstall_panel ;;
+      10) read -r -p 'Удалить только Fleet Manager? [y/N]: ' confirm </dev/tty; [[ "$confirm" =~ ^[Yy]$ ]] && uninstall_panel ;;
       0) return ;;
       *) log "Неверный выбор" ;;
     esac
