@@ -74,6 +74,10 @@
 
         <section id="view-nodes" class="view" hidden>
           <div class="section-heading"><div><p class="eyebrow">ПОДКЛЮЧЕНИЕ</p><h2>Узлы WDTT</h2></div><button id="refresh-nodes" class="button ghost">Обновить</button></div>
+          <article id="agent-endpoint-card" class="panel endpoint-card" hidden>
+            <div><p class="eyebrow">АДРЕС АГЕНТА</p><h2>Подключение WDTT Control Panel</h2><p class="form-help">Передайте этот адрес вместе с одноразовым грантом во вкладку Fleet удалённой панели.</p></div>
+            <div class="endpoint-value"><code id="agent-endpoint"></code><button id="copy-agent-endpoint" class="button secondary">Копировать адрес</button></div>
+          </article>
           <div class="two-columns">
             <form id="grant-form" class="panel form-card">
               <p class="eyebrow">НОВЫЙ УЗЕЛ</p><h2>Создать одноразовый грант</h2>

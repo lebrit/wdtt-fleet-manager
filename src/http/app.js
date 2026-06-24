@@ -119,7 +119,12 @@ export function createApp({
           snapshotAt: fleetUserDirectory.snapshotAt(node.id),
           userCount: users.filter((user) => user.nodeId === node.id).length,
         }));
-        return json(response, 200, { nodes, users, commands: commandQueue.list() });
+        return json(response, 200, {
+          nodes,
+          users,
+          commands: commandQueue.list(),
+          ...(agentEndpoint ? { agentEndpoint } : {}),
+        });
       }
 
       const revokeMatch = /^\/v1\/nodes\/([^/]+)\/revoke$/.exec(pathname);

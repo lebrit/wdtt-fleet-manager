@@ -1,6 +1,6 @@
 {
   "name": "wdtt-fleet-manager",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "private": true,
   "description": "Centralized, least-privilege management for WDTT Control Panel nodes.",
   "type": "module",
@@ -10,6 +10,6 @@
   "scripts": {
     "start": "node src/server.js",
     "test": "node --test",
-    "check": "node --check src/server.js && node --check src/http/app.js && node --check src/domain/admin-auth.js && node --check src/domain/agent-credentials.js && node --check src/domain/command-queue.js && node --check src/domain/enrollment-service.js && node --check src/domain/fleet-user-directory.js && node --check src/domain/node-registry.js && node --check src/domain/protocol.js && node --check src/domain/state-store.js && node --check src/domain/user-command-schema.js && node --check src/web/static.js"
+    "check": "node --check src/server.js && node --check src/http/app.js && node --check src/domain/admin-auth.js && node --check src/domain/agent-credentials.js && node --check src/domain/command-queue.js && node --check src/domain/enrollment-service.js && node --check src/domain/fleet-user-directory.js && node --check src/domain/node-registry.js && node --check src/domain/protocol.js && node --check src/domain/state-store.js && node --check src/domain/user-command-schema.js && node --check src/web/static.js && node --check src/web/app.js"
   }
 }

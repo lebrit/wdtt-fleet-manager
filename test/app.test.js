@@ -110,6 +110,19 @@ test('an enrollment grant is one-use and enables versioned heartbeat', async (t)
   assert.ok(node.lastSeenAt);
 });
 
+test('dashboard exposes the configured agent endpoint only after operator authentication', async (t) => {
+  const app = createApp({
+    authenticateAdmin: async () => ({ subject: 'operator' }),
+    agentEndpoint: 'https://fleet.example.com:8444/fleet-agent-secret/',
+  });
+  const baseUrl = await start(app);
+  t.after(() => app.close());
+
+  const response = await fetch(`${baseUrl}/v1/dashboard`);
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).agentEndpoint, 'https://fleet.example.com:8444/fleet-agent-secret/');
+});
+
 test('an agent receives only commands addressed to its enrolled node', async (t) => {
   const app = createApp({ authenticateAdmin: async () => ({ subject: 'operator' }) });
   t.after(() => app.close());

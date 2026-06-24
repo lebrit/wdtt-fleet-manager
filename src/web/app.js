@@ -94,6 +94,9 @@ function renderOverview(data) {
 
 function renderNodes(data) {
   const nodes = data.nodes;
+  const endpointCard = $('#agent-endpoint-card');
+  endpointCard.hidden = !data.agentEndpoint;
+  $('#agent-endpoint').textContent = data.agentEndpoint ?? '';
   $('#nodes-table').innerHTML = nodes.length ? nodes.map((node) => `
     <tr><td><strong>${escapeHtml(node.label)}</strong><small>${escapeHtml(node.id)}</small></td>
       <td><span class="badge ${node.state === 'revoked' ? 'danger' : isRecent(node) ? 'success' : 'neutral'}">${node.state === 'revoked' ? 'Отозван' : isRecent(node) ? 'На связи' : 'Ожидает'}</span></td>
@@ -256,6 +259,12 @@ function bindEvents() {
     if (!token) return;
     await navigator.clipboard.writeText(token);
     notice('Грант скопирован в буфер обмена.', 'success');
+  });
+  $('#copy-agent-endpoint').addEventListener('click', async () => {
+    const endpoint = state.dashboard?.agentEndpoint;
+    if (!endpoint) return;
+    await navigator.clipboard.writeText(endpoint);
+    notice('Адрес агента скопирован в буфер обмена.', 'success');
   });
 }
 
