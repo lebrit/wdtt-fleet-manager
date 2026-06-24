@@ -1,0 +1,15 @@
+{
+  "name": "wdtt-fleet-manager",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Centralized, least-privilege management for WDTT Control Panel nodes.",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test",
+    "check": "node --check src/server.js && node --check src/http/app.js && node --check src/domain/command-queue.js && node --check src/domain/node-registry.js"
+  }
+}
