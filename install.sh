@@ -5,6 +5,7 @@ FLEET_REPOSITORY="${WDTT_FLEET_REPOSITORY:-lebrit/wdtt-fleet-manager}"
 FLEET_BRANCH="${WDTT_FLEET_BRANCH:-main}"
 INSTALL_DIR="/opt/wdtt-fleet-manager"
 CONFIG_DIR="/etc/wdtt-fleet-manager"
+AUTH_FILE="/etc/nginx/wdtt-fleet-manager.htpasswd"
 STATE_DIR="/var/lib/wdtt-fleet-manager"
 LOG_FILE="/var/log/wdtt-fleet-manager-install.log"
 SERVICE_NAME="wdtt-fleet-manager.service"
@@ -149,10 +150,18 @@ AGENT_ENDPOINT=https://$PANEL_HOST:$PANEL_HTTPS_PORT$AGENT_PATH
 EOF
   chown root:wdtt-fleet "$CONFIG_DIR/app.env"
   chmod 0640 "$CONFIG_DIR/app.env"
-  htpasswd -bcB "$CONFIG_DIR/htpasswd" "$PANEL_USER" "$PANEL_PASSWORD" >>"$LOG_FILE" 2>&1
-  chown root:wdtt-fleet "$CONFIG_DIR/htpasswd"
-  chmod 0640 "$CONFIG_DIR/htpasswd"
+  htpasswd -bcB "$AUTH_FILE" "$PANEL_USER" "$PANEL_PASSWORD" >>"$LOG_FILE" 2>&1
+  chown root:root "$AUTH_FILE"
+  chmod 0644 "$AUTH_FILE"
   save_panel_config
+}
+
+migrate_auth_file() {
+  if [ -r "$CONFIG_DIR/htpasswd" ]; then
+    install -m 0644 -o root -g root "$CONFIG_DIR/htpasswd" "$AUTH_FILE"
+    rm -f "$CONFIG_DIR/htpasswd"
+  fi
+  [ -r "$AUTH_FILE" ] || die "Не найден файл Basic Auth; запустите смену пароля панели"
 }
 
 save_panel_config() {
@@ -281,7 +290,7 @@ server {
     location = ${PANEL_PATH%/} { return 302 $PANEL_PATH; }
     location ^~ $PANEL_PATH {
         auth_basic "WDTT Fleet Manager";
-        auth_basic_user_file $CONFIG_DIR/htpasswd;
+        auth_basic_user_file $AUTH_FILE;
         proxy_pass http://127.0.0.1:$PANEL_LISTEN_PORT/;
         proxy_http_version 1.1;
         proxy_set_header Host \$host;
@@ -378,7 +387,7 @@ install_panel() {
 }
 
 update_panel() {
-  require_root; load_config; detect_os; install_node; install_files "$FLEET_BRANCH"; ensure_service_user; write_service; write_nginx; systemctl restart "$SERVICE_NAME"; log "Панель обновлена"
+  require_root; load_config; detect_os; install_node; install_files "$FLEET_BRANCH"; ensure_service_user; migrate_auth_file; write_service; write_nginx; systemctl restart "$SERVICE_NAME"; log "Панель обновлена"
 }
 
 renew_certificates() {
@@ -404,8 +413,8 @@ change_password() {
     printf '\n'
   fi
   [ "${#PANEL_PASSWORD}" -ge 12 ] || die "Пароль должен содержать не менее 12 символов"
-  htpasswd -bcB "$CONFIG_DIR/htpasswd" "$PANEL_USER" "$PANEL_PASSWORD" >>"$LOG_FILE" 2>&1
-  chown root:wdtt-fleet "$CONFIG_DIR/htpasswd"; chmod 0640 "$CONFIG_DIR/htpasswd"
+  htpasswd -bcB "$AUTH_FILE" "$PANEL_USER" "$PANEL_PASSWORD" >>"$LOG_FILE" 2>&1
+  chown root:root "$AUTH_FILE"; chmod 0644 "$AUTH_FILE"
   log "Пароль веб-панели изменён"
 }
 
@@ -447,14 +456,14 @@ rollback_panel() {
     read -r -p 'Введите тег для отката: ' version </dev/tty
   fi
   [[ "$version" =~ ^[A-Za-z0-9._-]{1,80}$ ]] || die "Недопустимый тег"
-  install_files "$version"; ensure_service_user; write_service; write_nginx; systemctl restart "$SERVICE_NAME"
+  install_files "$version"; ensure_service_user; migrate_auth_file; write_service; write_nginx; systemctl restart "$SERVICE_NAME"
   log "Панель откатилась к $version"
 }
 
 uninstall_panel() {
   require_root
   systemctl disable --now "$SERVICE_NAME" wdtt-fleet-manager-cert-renew.timer 2>/dev/null || true
-  rm -f "/etc/systemd/system/$SERVICE_NAME" /etc/systemd/system/wdtt-fleet-manager-cert-renew.service /etc/systemd/system/wdtt-fleet-manager-cert-renew.timer "$NGINX_FILE"
+  rm -f "/etc/systemd/system/$SERVICE_NAME" /etc/systemd/system/wdtt-fleet-manager-cert-renew.service /etc/systemd/system/wdtt-fleet-manager-cert-renew.timer "$NGINX_FILE" "$AUTH_FILE"
   rm -f /usr/local/sbin/wdtt-fleet /usr/local/sbin/wdtt-fleet-update /usr/local/sbin/wdtt-fleet-status /usr/local/sbin/wdtt-fleet-uninstall
   rm -rf "$INSTALL_DIR" "$CONFIG_DIR"
   systemctl daemon-reload

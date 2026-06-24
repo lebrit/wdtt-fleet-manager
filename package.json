@@ -1,6 +1,6 @@
 {
   "name": "wdtt-fleet-manager",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "private": true,
   "description": "Centralized, least-privilege management for WDTT Control Panel nodes.",
   "type": "module",
