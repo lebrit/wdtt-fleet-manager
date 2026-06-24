@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="dark">
+    <title>WDTT Fleet Manager</title>
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <a class="brand" href="#overview" aria-label="WDTT Fleet Manager">
+          <span class="brand-mark">W</span>
+          <span><strong>WDTT</strong><small>Fleet Manager</small></span>
+        </a>
+        <nav class="nav" aria-label="Разделы панели">
+          <button class="nav-item active" data-view="overview">Обзор</button>
+          <button class="nav-item" data-view="nodes">Узлы</button>
+          <button class="nav-item" data-view="users">Пользователи</button>
+          <button class="nav-item" data-view="commands">Команды</button>
+        </nav>
+        <div class="scope-note">
+          Только WDTT / WireGuard.<br>Без shell, Xray и WARP.
+        </div>
+      </aside>
+
+      <main class="main-content">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">Центральная панель</p>
+            <h1 id="page-title">Обзор флота</h1>
+          </div>
+          <div class="connection">
+            <span id="connection-state" class="status-dot muted"></span>
+            <span id="connection-label">Не подключено</span>
+            <button id="open-access" class="button secondary">Доступ</button>
+          </div>
+        </header>
+
+        <section id="access-panel" class="access-panel" hidden>
+          <form id="access-form" class="inline-form">
+            <label>Токен оператора
+              <input id="access-token" type="password" autocomplete="off" spellcheck="false" minlength="32" placeholder="ADMIN_API_TOKEN" required>
+            </label>
+            <button class="button" type="submit">Подключиться</button>
+            <button id="forget-access" class="button ghost" type="button">Очистить</button>
+          </form>
+          <p>Токен хранится только до закрытия вкладки. Панель не создаёт и не показывает серверные секреты повторно.</p>
+        </section>
+
+        <div id="notice" class="notice" hidden></div>
+
+        <section id="view-overview" class="view">
+          <div class="summary-grid">
+            <article class="metric"><span>Узлы</span><strong id="metric-nodes">—</strong><small id="metric-active">— активных</small></article>
+            <article class="metric"><span>Пользователи</span><strong id="metric-users">—</strong><small>по последним снимкам</small></article>
+            <article class="metric"><span>Онлайн</span><strong id="metric-online">—</strong><small>по WireGuard handshake</small></article>
+            <article class="metric"><span>Ожидают</span><strong id="metric-pending">—</strong><small>команд</small></article>
+          </div>
+          <div class="panel split">
+            <div>
+              <div class="panel-heading"><div><p class="eyebrow">СОСТОЯНИЕ</p><h2>Узлы</h2></div><button id="refresh-overview" class="button ghost">Обновить</button></div>
+              <div id="overview-nodes" class="node-list empty">Подключите токен оператора.</div>
+            </div>
+            <div class="safe-boundary">
+              <p class="eyebrow">ГРАНИЦА ДОСТУПА</p>
+              <h2>Безопасное управление</h2>
+              <p>Панель выдаёт лишь типизированные команды пользователям WDTT. Узлы сами инициируют связь с центром.</p>
+              <ul><li>Нет удалённого терминала</li><li>Нет конфигурации Xray/WARP</li><li>Нет доступа к файловой системе</li></ul>
+            </div>
+          </div>
+        </section>
+
+        <section id="view-nodes" class="view" hidden>
+          <div class="section-heading"><div><p class="eyebrow">ПОДКЛЮЧЕНИЕ</p><h2>Узлы WDTT</h2></div><button id="refresh-nodes" class="button ghost">Обновить</button></div>
+          <div class="two-columns">
+            <form id="grant-form" class="panel form-card">
+              <p class="eyebrow">НОВЫЙ УЗЕЛ</p><h2>Создать одноразовый грант</h2>
+              <label>Метка узла<input name="label" pattern="[A-Za-z0-9][A-Za-z0-9-]{0,62}" placeholder="irkutsk-1" required></label>
+              <label>Срок действия<select name="ttl"><option value="15">15 минут</option><option value="60">1 час</option><option value="360">6 часов</option><option value="1440">24 часа</option></select></label>
+              <button class="button" type="submit">Создать грант</button>
+              <p class="form-help">Грант можно передать агенту только один раз. После регистрации повторно получить токен нельзя.</p>
+            </form>
+            <div id="grant-result" class="panel secret-card empty">Одноразовый грант появится здесь.</div>
+          </div>
+          <div class="panel table-panel"><div class="panel-heading"><div><p class="eyebrow">РЕЕСТР</p><h2>Зарегистрированные узлы</h2></div></div><div class="table-scroll"><table><thead><tr><th>Узел</th><th>Состояние</th><th>Последняя связь</th><th>Версия агента</th><th>Пользователи</th><th></th></tr></thead><tbody id="nodes-table"><tr><td colspan="6" class="empty">Нет данных.</td></tr></tbody></table></div></div>
+        </section>
+
+        <section id="view-users" class="view" hidden>
+          <div class="section-heading"><div><p class="eyebrow">СНИМКИ УЗЛОВ</p><h2>Пользователи</h2></div><button id="refresh-users" class="button ghost">Обновить</button></div>
+          <div class="panel table-panel"><div class="table-scroll"><table><thead><tr><th>Пользователь</th><th>Узел</th><th>Метка</th><th>Устройства</th><th>Трафик</th><th>Доступ</th><th>Online</th><th>Снимок</th></tr></thead><tbody id="users-table"><tr><td colspan="8" class="empty">Снимки от агентов ещё не поступали.</td></tr></tbody></table></div></div>
+          <p class="page-note">Данные отображаются из последнего снимка агента и могут быть устаревшими. Открытые ключи и секреты не передаются.</p>
+        </section>
+
+        <section id="view-commands" class="view" hidden>
+          <div class="section-heading"><div><p class="eyebrow">ОПЕРАЦИИ</p><h2>Команды</h2></div><button id="refresh-commands" class="button ghost">Обновить</button></div>
+          <div class="two-columns command-layout">
+            <form id="command-form" class="panel form-card">
+              <p class="eyebrow">НОВАЯ КОМАНДА</p><h2>Операция WDTT</h2>
+              <label>Узел<select id="command-node" name="nodeId" required><option value="">Сначала подключите узел</option></select></label>
+              <label>Операция<select id="command-kind" name="kind"><option value="node.snapshot.read">Обновить снимок узла</option><option value="user.read">Прочитать пользователя</option><option value="user.create">Создать пользователя</option><option value="user.update">Изменить одно поле</option><option value="user.delete">Удалить пользователя</option></select></label>
+              <div id="user-command-fields" class="command-fields">
+                <label>Локальный ID пользователя<input name="sourceUserId" placeholder="local-7"></label>
+                <div data-create-only><label>Имя<input name="displayName" placeholder="Алексей"></label><label>Метка<input name="label" placeholder="team-a"></label><label>Срок доступа<input name="expiresAt" type="datetime-local"></label><label>Лимит трафика, байт<input name="trafficLimitBytes" type="number" min="0" step="1"></label><label class="checkbox"><input name="enabled" type="checkbox" checked> Доступ включён</label></div>
+                <div data-update-only hidden><label>Ожидаемая ревизия<input name="expectedRevision" placeholder="7"></label><label>Изменить<select name="patchField"><option value="enabled">Состояние доступа</option><option value="displayName">Имя</option><option value="label">Метка</option><option value="expiresAt">Срок доступа</option><option value="trafficLimitBytes">Лимит трафика</option></select></label><label>Новое значение<input name="patchValue" placeholder="Значение"></label><p class="form-help">Для состояния укажите <code>true</code> или <code>false</code>; для срока — ISO‑дату или <code>null</code>.</p></div>
+              </div>
+              <button class="button" type="submit">Поставить в очередь</button>
+              <p class="form-help">Команда уйдёт только выбранному активному узлу. Повторные отправки защищены ключом идемпотентности.</p>
+            </form>
+            <div class="panel command-guide"><p class="eyebrow">СТАТУСЫ</p><h2>Как это работает</h2><ol><li>Оператор создаёт ограниченную команду.</li><li>Агент забирает только свои команды.</li><li>Агент подтверждает результат без логов и секретов.</li></ol><p>Создание и изменение используют только поля контракта WDTT.</p></div>
+          </div>
+          <div class="panel table-panel"><div class="panel-heading"><div><p class="eyebrow">ИСТОРИЯ</p><h2>Последние команды</h2></div></div><div class="table-scroll"><table><thead><tr><th>Время</th><th>Узел</th><th>Операция</th><th>Статус</th><th>Пользователь</th><th>Ошибка</th></tr></thead><tbody id="commands-table"><tr><td colspan="6" class="empty">Команд ещё нет.</td></tr></tbody></table></div></div>
+        </section>
+      </main>
+    </div>
+    <script type="module" src="app.js"></script>
+  </body>
+</html>

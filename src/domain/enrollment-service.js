@@ -20,10 +20,18 @@ function parseExpiry(expiresAt) {
 export class EnrollmentService {
   #grants = new Map();
   #activeGrantByLabel = new Map();
+  #persist;
 
-  constructor({ nodeRegistry, credentialStore }) {
+  constructor({ nodeRegistry, credentialStore, state = {}, persist = () => {} }) {
     this.nodeRegistry = nodeRegistry;
     this.credentialStore = credentialStore;
+    this.#persist = persist;
+    for (const grant of state.grants ?? []) {
+      if (!grant?.tokenDigest || !grant.label || !grant.expiresAt) continue;
+      const restored = Object.freeze({ id: grant.id, label: grant.label, expiresAt: grant.expiresAt, createdAt: grant.createdAt });
+      this.#grants.set(grant.tokenDigest, restored);
+      this.#activeGrantByLabel.set(restored.label, grant.tokenDigest);
+    }
   }
 
   issueGrant({ label, expiresAt }) {
@@ -44,6 +52,7 @@ export class EnrollmentService {
     });
     this.#grants.set(tokenDigest, grant);
     this.#activeGrantByLabel.set(normalizedLabel, tokenDigest);
+    this.#persist();
     return { grant, token };
   }
 
@@ -59,9 +68,10 @@ export class EnrollmentService {
     const node = this.nodeRegistry.register({
       label: grant.label,
       identityFingerprint,
-    });
-    const agentToken = this.credentialStore.issue(node.id);
-    this.#discardGrant(tokenDigest, grant);
+    }, { persist: false });
+    const agentToken = this.credentialStore.issue(node.id, { persist: false });
+    this.#discardGrant(tokenDigest, grant, { persist: false });
+    this.#persist();
     return { node, agentToken };
   }
 
@@ -72,8 +82,15 @@ export class EnrollmentService {
     }
   }
 
-  #discardGrant(tokenDigest, grant) {
+  #discardGrant(tokenDigest, grant, { persist = true } = {}) {
     this.#grants.delete(tokenDigest);
     this.#activeGrantByLabel.delete(grant.label);
+    if (persist) this.#persist();
+  }
+
+  exportState() {
+    return {
+      grants: [...this.#grants.entries()].map(([tokenDigest, grant]) => ({ tokenDigest, ...grant })),
+    };
   }
 }

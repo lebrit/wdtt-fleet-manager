@@ -1,20 +1,108 @@
 # WDTT Fleet Manager
 
-Private central control plane for multiple [WDTT Control Panel](https://github.com/lebrite/wdtt-control-panel) nodes.
+Центральная web-панель для нескольких самостоятельных [WDTT Control Panel](https://github.com/lebrit/wdtt-control-panel). Она показывает узлы и пользователей из последних снимков, ставит строго ограниченные команды в очередь и получает результаты от исходящих агентов на узлах.
 
-It manages only the narrow WDTT/WireGuard user surface: users, their labels, devices, expiry, traffic and online status. It deliberately does **not** expose a shell, generic file access, Xray, WARP or full-server administration.
+Панель управляет только пользовательской частью WDTT/WireGuard: пользователями, их метками, устройствами, сроками доступа, трафиком и состоянием online. В ней намеренно **нет** удалённого терминала, доступа к файлам, управления Xray/WARP, пакетами или сервером.
 
-## Current stage
+## Что уже есть
 
-This repository contains the first safe foundation: protocol/domain primitives, an in-memory development API, tests, and the architecture contract for the later node agent. It now includes one-use, 15-minute enrollment grants, a node-bound development credential, versioned heartbeat, credential rotation and immediate revocation. It is not yet suitable for controlling production nodes: persistent storage, mTLS termination, audit persistence, an operator UI and the WDTT agent still need to be implemented.
+- русскоязычная web-панель: обзор, узлы, пользователи и журнал команд;
+- одноразовые гранты регистрации, временные учётные данные агента, ротация и мгновенный отзыв;
+- версия протокола, heartbeat и `last_seen`;
+- типизированные команды `user.create`, `user.update`, `user.delete`, `user.read`, `node.snapshot.read` — произвольные поля и «команды» отклоняются;
+- снимки пользователей: метки, устройства, срок, трафик и online по данным агента;
+- статусы выполнения команд и идемпотентность;
+- атомарное JSON-хранилище состояния с правами `0600` для первой установки;
+- публичная HTTPS-точка Nginx со случайным URL и Basic Auth, как у WDTT Control Panel.
 
-## Local checks
+## Установка на сервер
 
-Requires Node.js 22 or newer.
+Поддерживаются Debian/Ubuntu и Fedora/RHEL-подобные системы. Команда открывает интерактивное меню установки, аналогичное WDTT Control Panel:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/lebrit/wdtt-fleet-manager/main/bootstrap.sh | sudo bash
+```
+
+Установщик спросит домен или публичный IPv4, логин и пароль панели, HTTPS-порт (по умолчанию `8444`) и сам создаст случайный URL. Он устанавливает Nginx, Node.js 22, systemd-сервис и пытается выпустить сертификат Let's Encrypt. Если публичный сертификат временно недоступен, создаётся self-signed сертификат.
+
+Панель открывается извне по адресу, который покажет установщик: `https://ваш-хост:8444/случайный-путь/`. Сам процесс Node.js остаётся внутренним за Nginx; это не ограничивает внешний доступ, а не даёт обойти HTTPS и аутентификацию.
+
+Неинтерактивный пример:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/lebrit/wdtt-fleet-manager/main/bootstrap.sh | \
+  sudo bash -s -- install --domain fleet.example.com --user admin \
+  --password 'Длинный-Случайный-Пароль' --non-interactive
+```
+
+Для Let's Encrypt у домена должна быть A/AAAA-запись на сервер, а TCP-порт `80` — доступен из интернета. Установщик открывает порты `80` и HTTPS-порт, когда обнаруживает активный UFW или firewalld.
+
+### Меню и обслуживание
+
+После установки доступно циклическое меню:
+
+```bash
+sudo wdtt-fleet
+```
+
+В нём есть только относящиеся к Fleet Manager действия:
+
+1. обновление из GitHub;
+2. откат к сохранённому GitHub-тегу;
+3. состояние и перезапуск сервиса;
+4. журнал systemd;
+5. сведения и обновление TLS-сертификата;
+6. смена пароля web-панели и случайного URL;
+7. удаление только Fleet Manager.
+
+Удобные команды:
+
+```bash
+sudo wdtt-fleet-status
+sudo wdtt-fleet-update
+sudo wdtt-fleet-uninstall
+sudo bash /opt/wdtt-fleet-manager/install.sh rollback --version v0.1.0
+```
+
+Обновление и удаление также можно запустить без локального wrapper:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/lebrit/wdtt-fleet-manager/main/update.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/lebrit/wdtt-fleet-manager/main/uninstall.sh | sudo bash
+```
+
+Установщик не устанавливает, не обновляет и не меняет WDTT, Xray, WARP, WireGuard или их конфигурацию. Это граница безопасности проекта, а не недостающая функция.
+
+## Как начать работу
+
+1. Войдите в web-панель по выданному адресу.
+2. В разделе **Узлы** создайте одноразовый грант. Панель один раз покажет и грант, и отдельный публичный адрес агента; передайте их будущей совместимой WDTT-панели по защищённому каналу.
+3. Агент регистрируется с публичным fingerprint, отправляет heartbeat и снимки пользователей, затем забирает только адресованные ему команды.
+4. В разделах **Пользователи** и **Команды** отображаются последние снимки и результат выполнения.
+
+Серверная часть протокола готова, однако сам агент и адаптер для `wdtt-control-panel` — следующий отдельный этап. До появления агента список пользователей будет пустым, а команды останутся в очереди.
+
+## Безопасность и текущие ограничения
+
+- Nginx публикует только случайный путь, защищённый Basic Auth; все остальные пути получают `404`.
+- Внутренний процесс доверяет заголовку оператора лишь на `127.0.0.1` за конфигурацией Nginx, которую создаёт установщик. Не публикуйте его порт напрямую.
+- Пароль хранится только как bcrypt-хеш Nginx. Состояние содержит хеши временных токенов агентов, а не их исходные значения.
+- JSON-хранилище — практичный старт для одного центра, но не замена PostgreSQL, журналу аудита и резервному копированию в production.
+- До mTLS агентская аутентификация использует временный узловой Bearer-токен. Не подключайте реальные удалённые узлы к недоверенной сети до следующего этапа с mTLS.
+
+Подробнее: [архитектура](docs/architecture.md) и [контракт интеграции WDTT](docs/wdtt-integration-contract.md).
+
+## Локальная проверка
+
+Нужен Node.js 22 или новее:
 
 ```powershell
 npm test
 npm run check
 ```
 
-See [the architecture](docs/architecture.md) and [WDTT integration contract](docs/wdtt-integration-contract.md).
+Сценарии установки проверяются в Linux:
+
+```bash
+bash -n bootstrap.sh install.sh update.sh uninstall.sh
+```

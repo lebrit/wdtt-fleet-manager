@@ -1,7 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { createApp } from '../src/http/app.js';
+import { JsonStateStore } from '../src/domain/state-store.js';
 
 async function start(app) {
   app.listen(0, '127.0.0.1');
@@ -35,6 +39,10 @@ test('management and agent paths fail closed without valid credentials', async (
   t.after(() => app.close());
   const baseUrl = await start(app);
 
+  const page = await fetch(baseUrl);
+  assert.equal(page.status, 200);
+  assert.match(await page.text(), /WDTT Fleet Manager/);
+
   for (const [path, method] of [
     ['/v1/enrollment-grants', 'POST'],
     ['/v1/commands', 'POST'],
@@ -44,6 +52,27 @@ test('management and agent paths fail closed without valid credentials', async (
     const response = await fetch(`${baseUrl}${path}`, { method });
     assert.equal(response.status, 401);
   }
+});
+
+test('persists enrolled nodes and agent credentials when a state file is configured', async (t) => {
+  const directory = mkdtempSync(join(tmpdir(), 'wdtt-fleet-test-'));
+  const stateStore = new JsonStateStore({ filePath: join(directory, 'state.json') });
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const options = { authenticateAdmin: async () => ({ subject: 'operator' }), stateStore };
+  const firstApp = createApp(options);
+  const baseUrl = await start(firstApp);
+  const { enrollment } = await enrollNode(baseUrl, 'irkutsk-1');
+  await new Promise((resolve) => firstApp.close(resolve));
+
+  const restoredApp = createApp(options);
+  t.after(() => restoredApp.close());
+  const restoredBaseUrl = await start(restoredApp);
+  const nodes = await fetch(`${restoredBaseUrl}/v1/nodes`);
+  assert.equal((await nodes.json()).nodes[0].id, enrollment.node.id);
+  const commands = await fetch(`${restoredBaseUrl}/v1/agent/commands`, {
+    headers: { authorization: `Bearer ${enrollment.agentToken}` },
+  });
+  assert.equal(commands.status, 200);
 });
 
 test('an enrollment grant is one-use and enables versioned heartbeat', async (t) => {
@@ -138,4 +167,66 @@ test('credential rotation and revocation immediately disable previous agent acce
     headers: { authorization: `Bearer ${agentToken}` },
   });
   assert.equal(revokedCredentials.status, 401);
+});
+
+test('an agent snapshot produces a node-scoped fleet user read model', async (t) => {
+  const app = createApp({ authenticateAdmin: async () => ({ subject: 'operator' }) });
+  t.after(() => app.close());
+  const baseUrl = await start(app);
+  const { enrollment } = await enrollNode(baseUrl, 'irkutsk-1');
+
+  const snapshot = await fetch(`${baseUrl}/v1/agent/snapshots`, {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${enrollment.agentToken}`,
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      protocolVersion: 'wdtt-fleet/v1',
+      users: [{
+        sourceUserId: 'local-7', displayName: 'Ada', label: 'team-a', enabled: true,
+        expiresAt: null, traffic: { receivedBytes: 120, sentBytes: 45 }, online: true,
+        devices: [{ sourceDeviceId: 'phone', label: 'Phone' }], revision: '7',
+      }],
+    }),
+  });
+  assert.equal(snapshot.status, 202);
+
+  const users = await fetch(`${baseUrl}/v1/fleet-users?nodeId=${enrollment.node.id}`);
+  const body = await users.json();
+  assert.equal(body.users.length, 1);
+  assert.equal(body.users[0].nodeId, enrollment.node.id);
+  assert.equal(body.users[0].traffic.receivedBytes, 120);
+});
+
+test('an agent can report a final status only for its own command', async (t) => {
+  const app = createApp({ authenticateAdmin: async () => ({ subject: 'operator' }) });
+  t.after(() => app.close());
+  const baseUrl = await start(app);
+  const first = await enrollNode(baseUrl, 'irkutsk-1');
+  const second = await enrollNode(baseUrl, 'irkutsk-2');
+
+  const created = await fetch(`${baseUrl}/v1/commands`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      nodeId: first.enrollment.node.id, kind: 'user.read', payload: { sourceUserId: 'local-7' },
+      idempotencyKey: 'status-1',
+    }),
+  });
+  const { command } = await created.json();
+
+  const wrongNode = await fetch(`${baseUrl}/v1/agent/command-receipts`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${second.enrollment.agentToken}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ protocolVersion: 'wdtt-fleet/v1', commandId: command.id, status: 'succeeded' }),
+  });
+  assert.equal(wrongNode.status, 400);
+
+  const completion = await fetch(`${baseUrl}/v1/agent/command-receipts`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${first.enrollment.agentToken}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ protocolVersion: 'wdtt-fleet/v1', commandId: command.id, status: 'succeeded' }),
+  });
+  assert.equal(completion.status, 200);
+  assert.equal((await completion.json()).command.status, 'succeeded');
 });

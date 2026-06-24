@@ -12,8 +12,20 @@ export class NodeRegistry {
   #nodes = new Map();
   #byLabel = new Map();
   #byIdentityFingerprint = new Map();
+  #persist;
 
-  register({ label, identityFingerprint }) {
+  constructor({ state = {}, persist = () => {} } = {}) {
+    this.#persist = persist;
+    for (const node of state.nodes ?? []) {
+      if (!node?.id || !node.label || !node.identityFingerprint) throw new Error('invalid persisted node');
+      const restored = Object.freeze({ ...node });
+      this.#nodes.set(restored.id, restored);
+      this.#byLabel.set(restored.label, restored.id);
+      this.#byIdentityFingerprint.set(restored.identityFingerprint, restored.id);
+    }
+  }
+
+  register({ label, identityFingerprint }, { persist = true } = {}) {
     const normalizedLabel = normalizeNodeLabel(label);
     if (this.#byLabel.has(normalizedLabel)) throw new Error('node label already exists');
     if (typeof identityFingerprint !== 'string' || !/^[a-f0-9]{64}$/i.test(identityFingerprint)) {
@@ -32,6 +44,7 @@ export class NodeRegistry {
     this.#nodes.set(node.id, node);
     this.#byLabel.set(normalizedLabel, node.id);
     this.#byIdentityFingerprint.set(normalizedFingerprint, node.id);
+    if (persist) this.#persist();
     return node;
   }
 
@@ -50,6 +63,7 @@ export class NodeRegistry {
       reportedVersions: Object.freeze({ protocolVersion, agentVersion, panelAdapterVersion }),
     });
     this.#nodes.set(nodeId, updated);
+    this.#persist();
     return updated;
   }
 
@@ -72,6 +86,11 @@ export class NodeRegistry {
     if (current.state === 'revoked') return current;
     const updated = Object.freeze({ ...current, state: 'revoked', revokedAt: new Date().toISOString() });
     this.#nodes.set(nodeId, updated);
+    this.#persist();
     return updated;
+  }
+
+  exportState() {
+    return { nodes: [...this.#nodes.values()] };
   }
 }

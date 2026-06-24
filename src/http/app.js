@@ -2,9 +2,12 @@ import { createServer } from 'node:http';
 import { AgentCredentialStore, createBearerAgentAuthenticator } from '../domain/agent-credentials.js';
 import { CommandQueue } from '../domain/command-queue.js';
 import { EnrollmentService } from '../domain/enrollment-service.js';
+import { FleetUserDirectory } from '../domain/fleet-user-directory.js';
 import { NodeRegistry } from '../domain/node-registry.js';
+import { PROTOCOL_VERSION } from '../domain/protocol.js';
+import { serveWebAsset } from '../web/static.js';
 
-const MAX_BODY_BYTES = 64 * 1024;
+const MAX_BODY_BYTES = 1024 * 1024;
 
 async function readJson(request) {
   let raw = '';
@@ -26,15 +29,48 @@ function reject(response, status, code) {
 
 export function createApp({
   authenticateAdmin = async () => null,
-  commandQueue = new CommandQueue(),
-  nodeRegistry = new NodeRegistry(),
-  agentCredentials = new AgentCredentialStore({ nodeRegistry }),
-  enrollmentService = new EnrollmentService({ nodeRegistry, credentialStore: agentCredentials }),
-  authenticateAgent = createBearerAgentAuthenticator({ credentialStore: agentCredentials }),
+  commandQueue: suppliedCommandQueue,
+  nodeRegistry: suppliedNodeRegistry,
+  fleetUserDirectory: suppliedFleetUserDirectory,
+  agentCredentials: suppliedAgentCredentials,
+  enrollmentService: suppliedEnrollmentService,
+  authenticateAgent: suppliedAuthenticateAgent,
+  stateStore,
+  agentEndpoint,
 } = {}) {
+  const restoredState = stateStore?.load() ?? {};
+  let commandQueue;
+  let nodeRegistry;
+  let fleetUserDirectory;
+  let agentCredentials;
+  let enrollmentService;
+  const persist = () => stateStore?.save({
+    nodes: nodeRegistry.exportState(),
+    agentCredentials: agentCredentials.exportState(),
+    enrollment: enrollmentService.exportState(),
+    commands: commandQueue.exportState(),
+    fleetUsers: fleetUserDirectory.exportState(),
+  });
+
+  nodeRegistry = suppliedNodeRegistry ?? new NodeRegistry({ state: restoredState.nodes, persist });
+  agentCredentials = suppliedAgentCredentials ?? new AgentCredentialStore({
+    nodeRegistry, state: restoredState.agentCredentials, persist,
+  });
+  enrollmentService = suppliedEnrollmentService ?? new EnrollmentService({
+    nodeRegistry, credentialStore: agentCredentials, state: restoredState.enrollment, persist,
+  });
+  commandQueue = suppliedCommandQueue ?? new CommandQueue({ state: restoredState.commands, persist });
+  fleetUserDirectory = suppliedFleetUserDirectory ?? new FleetUserDirectory({
+    state: restoredState.fleetUsers, persist,
+  });
+  const authenticateAgent = suppliedAuthenticateAgent ?? createBearerAgentAuthenticator({ credentialStore: agentCredentials });
+
   return createServer(async (request, response) => {
     try {
-      const pathname = new URL(request.url, 'http://localhost').pathname;
+      const url = new URL(request.url, 'http://localhost');
+      const { pathname } = url;
+
+      if (request.method === 'GET' && await serveWebAsset(pathname, response)) return;
 
       if (request.method === 'GET' && pathname === '/health') {
         return json(response, 200, { status: 'ok' });
@@ -45,7 +81,7 @@ export function createApp({
         if (!admin) return reject(response, 401, 'unauthenticated');
         const body = await readJson(request);
         const enrollment = enrollmentService.issueGrant(body);
-        return json(response, 201, enrollment);
+        return json(response, 201, { ...enrollment, ...(agentEndpoint ? { agentEndpoint } : {}) });
       }
 
       if (request.method === 'POST' && pathname === '/v1/agent/enroll') {
@@ -58,6 +94,32 @@ export function createApp({
         const admin = await authenticateAdmin(request);
         if (!admin) return reject(response, 401, 'unauthenticated');
         return json(response, 200, { nodes: nodeRegistry.list() });
+      }
+
+      if (request.method === 'GET' && pathname === '/v1/fleet-users') {
+        const admin = await authenticateAdmin(request);
+        if (!admin) return reject(response, 401, 'unauthenticated');
+        const nodeId = url.searchParams.get('nodeId') ?? undefined;
+        return json(response, 200, { users: fleetUserDirectory.list({ nodeId }) });
+      }
+
+      if (request.method === 'GET' && pathname === '/v1/commands') {
+        const admin = await authenticateAdmin(request);
+        if (!admin) return reject(response, 401, 'unauthenticated');
+        const nodeId = url.searchParams.get('nodeId') ?? undefined;
+        return json(response, 200, { commands: commandQueue.list({ nodeId }) });
+      }
+
+      if (request.method === 'GET' && pathname === '/v1/dashboard') {
+        const admin = await authenticateAdmin(request);
+        if (!admin) return reject(response, 401, 'unauthenticated');
+        const users = fleetUserDirectory.list();
+        const nodes = nodeRegistry.list().map((node) => ({
+          ...node,
+          snapshotAt: fleetUserDirectory.snapshotAt(node.id),
+          userCount: users.filter((user) => user.nodeId === node.id).length,
+        }));
+        return json(response, 200, { nodes, users, commands: commandQueue.list() });
       }
 
       const revokeMatch = /^\/v1\/nodes\/([^/]+)\/revoke$/.exec(pathname);
@@ -96,6 +158,23 @@ export function createApp({
         const body = await readJson(request);
         const node = nodeRegistry.heartbeat(agent.nodeId, body);
         return json(response, 200, { nodeId: node.id, lastSeenAt: node.lastSeenAt });
+      }
+
+      if (request.method === 'POST' && pathname === '/v1/agent/snapshots') {
+        const agent = await authenticateAgent(request);
+        if (!agent?.nodeId) return reject(response, 401, 'unauthenticated');
+        const body = await readJson(request);
+        const snapshot = fleetUserDirectory.ingestSnapshot(agent.nodeId, body);
+        return json(response, 202, snapshot);
+      }
+
+      if (request.method === 'POST' && pathname === '/v1/agent/command-receipts') {
+        const agent = await authenticateAgent(request);
+        if (!agent?.nodeId) return reject(response, 401, 'unauthenticated');
+        const { protocolVersion, ...receipt } = await readJson(request);
+        if (protocolVersion !== PROTOCOL_VERSION) throw new Error('unsupported protocol version');
+        const command = commandQueue.recordReceipt({ nodeId: agent.nodeId, ...receipt });
+        return json(response, 200, { command });
       }
 
       if (request.method === 'GET' && pathname === '/v1/agent/commands') {

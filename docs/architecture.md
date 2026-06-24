@@ -1,92 +1,108 @@
-# Architecture: WDTT Fleet Manager
+# Архитектура WDTT Fleet Manager
 
-## Purpose and boundary
+## Назначение и границы
 
-WDTT Fleet Manager is a central control plane for a fleet of independently deployed WDTT Control Panel instances. Each instance remains the authority for its local WireGuard state. The central service coordinates the limited user-management and telemetry interface below; it never receives shell access and has no endpoint for Xray, WARP, package management, arbitrary process execution, filesystem access, or raw WireGuard configuration.
+WDTT Fleet Manager — центральная плоскость управления независимыми экземплярами WDTT Control Panel. Каждый узел остаётся источником истины для локального WireGuard/WDTT-состояния. Центр получает нормализованные снимки и отправляет небольшой список типизированных команд пользователям.
 
-The first implementation targets a single central deployment and an outgoing node-agent connection. A node must not require a public administrative HTTP listener.
-
-## Trust and connection model
+Центр **не** получает shell-доступ, не выполняет произвольные процессы, не читает файлы, не меняет raw-конфигурацию WireGuard и не имеет endpoint'ов для Xray, WARP, пакетов или управления хостом.
 
 ```mermaid
 flowchart LR
-  Operator["Fleet operator"] -->|"authenticated browser/API"| Central["Fleet Manager\ncontrol plane"]
-  AgentA["WDTT agent: node A"] -->|"outbound mTLS channel"| Central
-  AgentB["WDTT agent: node B"] -->|"outbound mTLS channel"| Central
-  AgentA -->|"typed local adapter"| WDTTa["WDTT panel A\nWireGuard users only"]
-  AgentB -->|"typed local adapter"| WDTTb["WDTT panel B\nWireGuard users only"]
+  Operator["Оператор"] -->|"HTTPS + аутентификация"| Central["Fleet Manager"]
+  AgentA["Агент WDTT: узел A"] -->|"исходящее соединение"| Central
+  AgentB["Агент WDTT: узел B"] -->|"исходящее соединение"| Central
+  AgentA -->|"типизированный локальный адаптер"| WDTTa["WDTT A\nпользователи WireGuard"]
+  AgentB -->|"типизированный локальный адаптер"| WDTTb["WDTT B\nпользователи WireGuard"]
 ```
 
-The preferred transport is a persistent outbound mTLS stream (WebSocket, HTTP/2 or a small purpose-built stream). Long polling is an acceptable initial fallback: the agent initiates every request and obtains only commands addressed to its own identity. The central service never connects directly to a node.
+Центр никогда не устанавливает соединение с узлом. Агент сам регистрируется, отправляет heartbeat/снимки и забирает только собственные команды. Долгий polling — начальный транспорт; постоянный исходящий mTLS-канал — целевой.
 
-Every enrolled node has an immutable `node_id`, a mutable unique display `label`, an active certificate/public-key identity and lifecycle state (`active`, `revoked`). The certificate subject is bound to `node_id`; a request may never choose another node in its JSON body. The central service stores certificate fingerprints and key-rotation history. Operators enroll a node using a one-use, short-lived enrollment grant and approve its public key; the returned bootstrap material is consumed once and is never logged.
+## Web-панель и установка
 
-The current development scaffold implements the grant lifecycle and an in-memory, hashed bearer bootstrap credential. `POST /v1/enrollment-grants` is operator-authenticated; `POST /v1/agent/enroll` consumes the grant exactly once and returns the agent credential once. The same temporary credential can be explicitly rotated or revoked. It exists solely to exercise the protocol before mTLS termination and persistent secret storage are added; deployment must not treat it as a replacement for mTLS.
+Пользовательский интерфейс состоит из разделов **Обзор**, **Узлы**, **Пользователи** и **Команды**. Он не интерпретирует серверные логи и не содержит скрытых административных действий.
 
-Key rotation overlaps the old and new certificate for a short, configured window. Revocation immediately prevents polling and command acknowledgement. Node health derives from authenticated heartbeat receipts: `last_seen_at`, reported agent/panel protocol versions and a computed availability state. A stale node is read-only in the UI and all new mutations are rejected or held pending according to the operation policy.
+Установщик строит публичную схему, совпадающую по принципу с WDTT Control Panel:
 
-## Protocol and commands
+```mermaid
+flowchart LR
+  Browser["Браузер оператора"] -->|"HTTPS, Basic Auth, случайный путь"| Nginx
+  Nginx -->|"localhost + проверенный оператор"| Service["Node.js Fleet Manager"]
+  Service --> State["/var/lib/wdtt-fleet-manager/state.json"]
+```
 
-All messages have an explicit protocol version, for example `wdtt-fleet/v1`. Unsupported major versions fail closed. Additive fields and minor versions are ignored only where documented; agents send their supported version range during heartbeat.
+Nginx открывает HTTPS-порт и публикует два случайных пути: операторскую панель с Basic Auth и отдельный адрес агента. Процесс Node.js слушает loopback и поэтому не может быть вызван снаружи в обход Nginx. На адресе агента Nginx принудительно удаляет операторский заголовок: агент получает доступ только по своему гранту или токену. Заголовок оператора принимается только за операторским Nginx-маршрутом (`TRUST_PROXY_ADMIN=true`); при запуске без Nginx API остаётся fail-closed, пока не задан `ADMIN_API_TOKEN`.
 
-The central service emits a deliberately small command union:
+## Регистрация и идентичность узла
 
-| Kind | Intent | Idempotency key |
-| --- | --- | --- |
-| `user.create` | Create a WireGuard/WDTT user | central command ID |
-| `user.update` | Change allowed user fields | central command ID + expected revision |
-| `user.delete` | Remove a user | central command ID |
-| `user.read` | Refresh a user record | central command ID |
-| `node.snapshot.read` | Refresh users and node status | central command ID |
+1. Оператор создаёт грант с уникальной меткой и сроком не более 24 часов; по умолчанию — 15 минут.
+2. Агент один раз обменивает грант и SHA-256 fingerprint своей идентичности на неизменяемый `node_id` и временный токен агента.
+3. В памяти и в state-файле хранится только SHA-256 токена, не его исходное значение.
+4. Агент использует токен для heartbeat, polling команд, снимков и квитанций.
+5. Ротация инвалидирует старый токен сразу; отзыв узла блокирует и токены, и создание новых команд.
 
-There is no command escape hatch. Payload schemas prohibit unknown operation names and reject fields outside the WDTT user contract. An agent stores completed command IDs durably and returns the original result on replay. The central side also de-duplicates a client mutation by `idempotency_key`; it never issues two active commands for the same key. Commands are immutable, ordered per node only where required, time-bounded, auditable and transition through `queued → delivered → succeeded|failed|expired`.
+Метка узла уникальна, fingerprint тоже уникален. Имя пользователя не является глобальным ключом: пользователь идентифицируется парой **(`node_id`, `source_user_id`)**.
 
-An agent reports command results and telemetry with an event ID. Receipt is idempotent. Results include sanitized error codes, not server logs or secrets.
+Текущий Bearer-токен — промежуточный механизм для обкатки протокола. Production-цель: mTLS с сертификатом, привязанным к `node_id`, короткой фазой перекрытия ключей, отзывом и журналом ротации.
 
-## Data model
+## Протокол
 
-The production database will contain the following core records:
+Все сообщения содержат версию `wdtt-fleet/v1`. Несовместимая версия отклоняется до выполнения действия.
 
-| Record | Key / constraints | Notes |
-| --- | --- | --- |
-| `nodes` | immutable UUID; unique normalized label | lifecycle, last seen, protocol versions |
-| `node_identities` | node ID + certificate fingerprint | valid window, rotation/revocation audit |
-| `fleet_users` | **unique (`node_id`, `source_user_id`)** | cached read model, never globally assumes name uniqueness |
-| `user_devices` | node ID + source user ID + source device ID | device/public-key metadata allowed by WDTT |
-| `user_usage_snapshots` | node ID + source user ID + captured time | traffic and handshake-derived online state |
-| `commands` | immutable UUID; unique client idempotency key | command payload digest, state and result |
-| `command_receipts` | command ID + node ID | delivery/agent execution record |
-| `audit_events` | append-only UUID | actor, node, target, before/after redacted metadata |
+### Операторские команды
 
-User labels stay a user property and node labels stay a node property: both are returned in fleet user views. `source_user_id` is the local WDTT identifier and remains opaque to the central service. Availability is explicit rather than inferred from stale telemetry.
+| Команда | Разрешённые данные |
+| --- | --- |
+| `user.create` | `sourceUserId`, отображаемое имя, метка, срок, лимит трафика, включённость |
+| `user.update` | `sourceUserId`, обязательная ревизия, одно или несколько разрешённых изменений |
+| `user.delete` | `sourceUserId` |
+| `user.read` | `sourceUserId` |
+| `node.snapshot.read` | пустой объект |
 
-## Operations while a node is unavailable
+Неизвестные поля, произвольные операции и командные строки отклоняются на центре. Ключ идемпотентности возвращает первоначальную команду при повторной отправке. Команда имеет срок жизни и состояние `queued → delivered → succeeded|failed|expired`.
 
-Reads display the most recent snapshot with its capture time and an unavailable/stale indicator. Mutations default to rejecting stale nodes before command creation. A later explicit `queue_when_offline` operator policy may permit only idempotent user updates/deletes with a short expiry; it must be visible in the audit trail and cancelable before delivery. Creates are not automatically retried after an ambiguous timeout unless the agent proves the command ID has not run.
+Агент сообщает квитанцию только для команды своего узла. Ошибка — короткий документированный код; логи, пути, секреты и вывод программ не передаются.
 
-## WDTT Control Panel integration (later)
+### Снимок пользователей
 
-The existing WDTT project should gain three isolated modules, behind an opt-in configuration flag and without changing Xray/WARP code paths:
+Снимок содержит ограниченный набор полей: локальный ID, имя, пользовательскую метку, флаг доступа, срок, счётчики входящего/исходящего трафика, online, устройства и ревизию. `online` вычисляет локальная WDTT-панель по свежему WireGuard handshake. Private keys, конфигурации, токены, raw-метрики хоста и Xray/WARP-данные запрещены.
 
-1. A local **user operations service** that performs existing WDTT/WireGuard user actions through a shared typed interface, validates allowed fields and preserves local authorization/business rules.
-2. A **status/telemetry service** that returns normalized users, labels, devices, expiry, traffic and recent-WireGuard-handshake online state. It returns no arbitrary configuration or secrets.
-3. An outbound **fleet agent** that authenticates to Fleet Manager, translates only the versioned command union, persists idempotency receipts, sends heartbeat/snapshots, and has no shell/subprocess command interface.
+Снимок заменяет read-model данного узла целиком. В UI всегда показывается `capturedAt`, чтобы устаревшие данные нельзя было принять за текущие.
 
-The agent should call the local service in-process or through a loopback-only private adapter; it must not turn the current WDTT web API into a public fleet-administration API.
+## Хранилище и развитие
 
-## Migration and compatibility
+Первый развёртываемый вариант использует атомарный JSON-файл с правами `0600`: узлы, хеши агентских токенов, незавершённые команды и последний снимок переживают перезапуск. Это не кластерное хранилище и не полноценный audit trail.
 
-1. Add the local service and agent disabled by default; existing panel behavior is unchanged.
-2. Ship read-only snapshot support first and verify version/identity/telemetry on a test node.
-3. Enable user mutations behind a per-node feature flag after a successful read-only period.
-4. Maintain protocol support for at least the current and immediately previous major agent version during upgrades. The center rejects incompatible nodes with a clear upgrade-required state.
-5. Use expand/contract database migrations: add nullable fields and dual reads/writes first, backfill, then enforce constraints in a later release. Never auto-enroll existing panels or silently rotate credentials.
+Перед production-эксплуатацией требуется переход на PostgreSQL и append-only аудит:
 
-## Security defaults
+| Сущность | Ограничение |
+| --- | --- |
+| `nodes` | неизменяемый UUID, уникальная нормализованная метка |
+| `node_identities` | `node_id` + fingerprint, период действия, отзыв |
+| `fleet_users` | уникальная пара `node_id`, `source_user_id` |
+| `user_devices` | узел + пользователь + локальный ID устройства |
+| `user_usage_snapshots` | узел + пользователь + время снимка |
+| `commands` | UUID, уникальный client idempotency key |
+| `command_receipts` | команда + узел |
+| `audit_events` | append-only событие с актором и редактированными данными |
 
-- Fail closed when operator or agent authentication is absent.
-- Terminate mTLS at a trusted component and pass verified node identity only over a private channel.
-- Store private keys in a secret manager; logs, audit events and command results are redacted.
-- Enforce rate limits, request size limits, timeouts, replay protection and per-node authorization.
-- Require an authenticated, audited operator action for node enrollment, rotation, label change and revocation.
-- Treat the central cached user view as sensitive operational data; minimize retention and restrict export.
+## Поведение при недоступном узле
+
+UI оставляет последний снимок и время его получения. Новая команда доступна лишь активному, неотозванному узлу; политика постановки мутаций для offline-узлов будет отдельной, явной и аудируемой. Создание пользователя не повторяется автоматически после неоднозначного тайм-аута.
+
+## Интеграция в WDTT Control Panel
+
+В исходную WDTT-панель нужно добавить только три opt-in модуля, не трогая Xray/WARP:
+
+1. Локальный сервис пользовательских операций с общей типизированной моделью.
+2. Сервис статуса, который формирует разрешённый снимок пользователей.
+3. Исходящий агент Fleet Manager с durable-квитанциями и проверкой версии/срока команды.
+
+Подробный контракт — в [wdtt-integration-contract.md](wdtt-integration-contract.md).
+
+## Безопасные значения по умолчанию
+
+- API оператора и агента fail-closed.
+- Тело запроса ограничено 1 МБ; список пользователей в одном снимке — 500.
+- Секреты показываются только при первичной выдаче, не попадают в state-файл и UI-историю.
+- Nginx выдаёт `404` вне секретного пути и завершает TLS до приложения.
+- mTLS, OIDC/сессии вместо Basic Auth, rate limiting, резервные копии и аудит — обязательные следующие production-работы.
