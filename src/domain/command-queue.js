@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
+import { PROTOCOL_VERSION } from './protocol.js';
 
-export const PROTOCOL_VERSION = 'wdtt-fleet/v1';
+export { PROTOCOL_VERSION } from './protocol.js';
 
 export const COMMAND_KINDS = new Set([
   'user.create',

@@ -21,6 +21,8 @@ The preferred transport is a persistent outbound mTLS stream (WebSocket, HTTP/2 
 
 Every enrolled node has an immutable `node_id`, a mutable unique display `label`, an active certificate/public-key identity and lifecycle state (`active`, `revoked`). The certificate subject is bound to `node_id`; a request may never choose another node in its JSON body. The central service stores certificate fingerprints and key-rotation history. Operators enroll a node using a one-use, short-lived enrollment grant and approve its public key; the returned bootstrap material is consumed once and is never logged.
 
+The current development scaffold implements the grant lifecycle and an in-memory, hashed bearer bootstrap credential. `POST /v1/enrollment-grants` is operator-authenticated; `POST /v1/agent/enroll` consumes the grant exactly once and returns the agent credential once. The same temporary credential can be explicitly rotated or revoked. It exists solely to exercise the protocol before mTLS termination and persistent secret storage are added; deployment must not treat it as a replacement for mTLS.
+
 Key rotation overlaps the old and new certificate for a short, configured window. Revocation immediately prevents polling and command acknowledgement. Node health derives from authenticated heartbeat receipts: `last_seen_at`, reported agent/panel protocol versions and a computed availability state. A stale node is read-only in the UI and all new mutations are rejected or held pending according to the operation policy.
 
 ## Protocol and commands

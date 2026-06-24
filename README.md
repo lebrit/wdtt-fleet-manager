@@ -6,7 +6,7 @@ It manages only the narrow WDTT/WireGuard user surface: users, their labels, dev
 
 ## Current stage
 
-This repository contains the first safe foundation: protocol/domain primitives, an in-memory development API, tests, and the architecture contract for the later node agent. It is not yet suitable for controlling production nodes: persistent storage, mTLS termination, an operator UI and the WDTT agent still need to be implemented.
+This repository contains the first safe foundation: protocol/domain primitives, an in-memory development API, tests, and the architecture contract for the later node agent. It now includes one-use, 15-minute enrollment grants, a node-bound development credential, versioned heartbeat, credential rotation and immediate revocation. It is not yet suitable for controlling production nodes: persistent storage, mTLS termination, audit persistence, an operator UI and the WDTT agent still need to be implemented.
 
 ## Local checks
 
