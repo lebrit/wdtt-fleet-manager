@@ -2,7 +2,7 @@ import { PROTOCOL_VERSION } from './protocol.js';
 
 const MAX_USERS_PER_SNAPSHOT = 500;
 const USER_FIELDS = new Set([
-  'sourceUserId', 'displayName', 'label', 'enabled', 'expiresAt', 'traffic', 'online', 'devices', 'revision',
+  'sourceUserId', 'displayName', 'label', 'enabled', 'expiresAt', 'traffic', 'online', 'devices', 'revision', 'vkHashes', 'ports',
 ]);
 const TRAFFIC_FIELDS = new Set(['receivedBytes', 'sentBytes']);
 const DEVICE_FIELDS = new Set(['sourceDeviceId', 'label']);
@@ -73,6 +73,8 @@ function normalizeUser(value) {
     online: value.online,
     devices: normalizeDevices(value.devices),
     revision: nonEmptyString(value.revision, 'revision'),
+    vkHashes: nullableString(value.vkHashes, 'vkHashes', 256) ?? '',
+    ports: nullableString(value.ports, 'ports', 256) ?? '',
   });
 }
 

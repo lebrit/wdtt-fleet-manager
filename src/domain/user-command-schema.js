@@ -1,9 +1,9 @@
 const USER_FIELD_NAMES = new Set([
-  'displayName',
   'label',
   'expiresAt',
-  'trafficLimitBytes',
   'enabled',
+  'vkHashes',
+  'ports',
 ]);
 
 function isPlainObject(value) {
@@ -46,21 +46,21 @@ function normalizePatch(value) {
 
   const patch = {};
   for (const [field, fieldValue] of Object.entries(value)) {
-    if (field === 'displayName' || field === 'label') {
+    if (field === 'label') {
       if (fieldValue !== null && (typeof fieldValue !== 'string' || fieldValue.trim() === '' || fieldValue.length > 128)) {
         throw new Error(`${field} is invalid`);
       }
       patch[field] = fieldValue === null ? null : fieldValue.trim();
     } else if (field === 'expiresAt') {
       patch[field] = assertIsoOrNull(fieldValue, field);
-    } else if (field === 'trafficLimitBytes') {
-      if (fieldValue !== null && (!Number.isSafeInteger(fieldValue) || fieldValue < 0)) {
-        throw new Error('trafficLimitBytes is invalid');
-      }
-      patch[field] = fieldValue;
     } else if (field === 'enabled') {
       if (typeof fieldValue !== 'boolean') throw new Error('enabled is invalid');
       patch[field] = fieldValue;
+    } else if (field === 'vkHashes' || field === 'ports') {
+      if (typeof fieldValue !== 'string' || fieldValue.trim() === '' || fieldValue.length > 256) {
+        throw new Error(`${field} is invalid`);
+      }
+      patch[field] = fieldValue.trim();
     }
   }
   return Object.freeze(patch);
@@ -82,7 +82,11 @@ export function normalizeCommandPayload(kind, payload) {
   if (kind === 'user.create') {
     assertAllowedKeys(payload, new Set(['sourceUserId', ...USER_FIELD_NAMES]));
     const { sourceUserId, ...patch } = payload;
-    return Object.freeze({ sourceUserId: assertSourceUserId(sourceUserId), ...normalizePatch(patch) });
+    const normalizedPatch = normalizePatch(patch);
+    if (!normalizedPatch.vkHashes || !normalizedPatch.ports) {
+      throw new Error('vkHashes and ports are required for user.create');
+    }
+    return Object.freeze({ sourceUserId: assertSourceUserId(sourceUserId), ...normalizedPatch });
   }
 
   if (kind === 'user.update') {

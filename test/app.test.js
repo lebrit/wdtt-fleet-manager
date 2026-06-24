@@ -187,6 +187,7 @@ test('an agent snapshot produces a node-scoped fleet user read model', async (t)
         sourceUserId: 'local-7', displayName: 'Ada', label: 'team-a', enabled: true,
         expiresAt: null, traffic: { receivedBytes: 120, sentBytes: 45 }, online: true,
         devices: [{ sourceDeviceId: 'phone', label: 'Phone' }], revision: '7',
+        vkHashes: 'hash-one', ports: '56000,56001,9000',
       }],
     }),
   });
@@ -197,6 +198,7 @@ test('an agent snapshot produces a node-scoped fleet user read model', async (t)
   assert.equal(body.users.length, 1);
   assert.equal(body.users[0].nodeId, enrollment.node.id);
   assert.equal(body.users[0].traffic.receivedBytes, 120);
+  assert.equal(body.users[0].ports, '56000,56001,9000');
 });
 
 test('an agent can report a final status only for its own command', async (t) => {

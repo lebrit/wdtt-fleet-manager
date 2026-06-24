@@ -108,7 +108,7 @@ function renderNodes(data) {
 function renderUsers(data) {
   const nodes = new Map(data.nodes.map((node) => [node.id, node]));
   $('#users-table').innerHTML = data.users.length ? data.users.map((user) => `
-    <tr><td><strong>${escapeHtml(user.displayName ?? user.sourceUserId)}</strong><small>${escapeHtml(user.sourceUserId)}</small></td>
+    <tr><td><strong>${escapeHtml(user.displayName ?? user.sourceUserId)}</strong><small>${escapeHtml(user.sourceUserId)}</small><small>ревизия: ${escapeHtml(user.revision)}</small></td>
       <td>${escapeHtml(nodes.get(user.nodeId)?.label ?? user.nodeId)}</td><td>${escapeHtml(user.label ?? '—')}</td>
       <td>${user.devices.length}</td><td>${formatBytes(user.traffic.receivedBytes)} ↓<br>${formatBytes(user.traffic.sentBytes)} ↑</td>
       <td><span class="badge ${user.enabled ? 'success' : 'neutral'}">${user.enabled ? 'Включён' : 'Выключен'}</span></td>
@@ -161,10 +161,10 @@ function commandPayload(form, kind) {
   if (kind === 'user.create') {
     return {
       sourceUserId,
-      displayName: form.elements.displayName.value.trim() || null,
+      vkHashes: form.elements.vkHashes.value.trim(),
+      ports: form.elements.ports.value.trim(),
       label: form.elements.label.value.trim() || null,
       expiresAt: toIsoOrNull(form.elements.expiresAt.value),
-      trafficLimitBytes: form.elements.trafficLimitBytes.value === '' ? null : Number(form.elements.trafficLimitBytes.value),
       enabled: form.elements.enabled.checked,
     };
   }
@@ -174,8 +174,6 @@ function commandPayload(form, kind) {
   if (patchField === 'enabled') {
     if (!['true', 'false'].includes(patchValue)) throw new Error('Для состояния укажите true или false.');
     patchValue = patchValue === 'true';
-  } else if (patchField === 'trafficLimitBytes') {
-    patchValue = Number(patchValue);
   } else if (patchField === 'expiresAt' && patchValue !== 'null') {
     patchValue = toIsoOrNull(patchValue);
   }
